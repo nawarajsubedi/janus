@@ -9,7 +9,7 @@ LABELS = [
     "date of birth", "passport number", "national identification number",
 ]
 # Labels that get a realistic fake value instead of a bracket token: label -> kind
-FAKE_KIND = {"person": "name", "patient name": "name", "address": "address"}
+FAKE_KIND = {"person": "name", "patient name": "name", "address": "address", "email": "email", "phone number": "phone"}
 FIRST_NAMES = ["James", "Emma", "Oliver", "Charlotte", "William", "Amelia", "Henry", "Grace", "Thomas", "Olivia", "Daniel", "Hannah"]
 LAST_NAMES = ["Wilson", "Turner", "Harris", "Walker", "Clarke", "Wright", "Hughes", "Foster", "Morgan", "Cooper", "Ward", "Bailey"]
 CITIES = ["Springfield", "Riverton", "Fairview", "Lakewood", "Georgetown", "Clayton", "Ashland", "Milford", "Oakdale", "Brookfield", "Hudson", "Salem"]
@@ -24,6 +24,8 @@ STATES = {
     "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia",
     "Wisconsin", "Wyoming",
 }
+EMAILS = ["alex.morgan", "sam.taylor", "chris.lee", "pat.quinn", "jordan.blake", "casey.reed",
+          "drew.parker", "taylor.hayes", "riley.stone", "jamie.fox", "avery.cole", "robin.shaw"]  # at example.com
 STREET_WORD = re.compile(r"\b(street|st|avenue|ave|road|rd|boulevard|blvd|lane|ln|drive|dr|way|court|ct)\b", re.I)
 GAP = {"name": re.compile(r" {1,2}"), "address": re.compile(r"\s*,?\s*")}  # text allowed between spans we merge
 TOKEN = re.compile(r"\[([A-Z_]+_\d+)\]")
@@ -60,7 +62,7 @@ def merge_adjacent(text: str, ents: list[dict[str, Any]]) -> list[dict[str, Any]
 class Vault:
     """Per-request mapping of placeholder <-> original value.
 
-    People and addresses get realistic fake values (so the model can use them naturally); every
+    People, addresses, emails and phones get realistic fake values (so the model can use them naturally); every
     other label gets a bracket token like `[EMAIL_1]`. Both are swapped back in the reply.
     """
 
@@ -80,6 +82,8 @@ class Vault:
         if not words:
             return None
         kind = FAKE_KIND[label]
+        if kind in ("email", "phone"):
+            return self._fake_contact(kind, original, text)
         if kind == "address":
             if original[:1].isdigit() or STREET_WORD.search(original):
                 kind = "street"
@@ -101,6 +105,25 @@ class Vault:
             if len(parts) == 2 and len(words) == 2:  # the model may reply with only one half
                 self.names.setdefault(parts[0], words[0])
                 self.names.setdefault(parts[1], words[1])
+            return fake
+        return None
+
+    def _fake_contact(self, kind: str, original: str, text: str) -> str | None:
+        """Fake email (example.com) or phone (555-01xx, same punctuation as the original)."""
+        while (i := self._next.get(kind, 0)) < (len(EMAILS) if kind == "email" else 100):
+            self._next[kind] = i + 1
+            if kind == "email":
+                fake = f"{EMAILS[i]}@example.com"
+            else:
+                n = len(re.findall(r"\d", original))
+                digits = f"20255501{i:02d}"  # 10-digit fictional number; 555-0100..0199 is reserved for fiction
+                digits = ("1" + digits if n == 11 and original.lstrip("+ ").startswith("1") else digits if n >= 10 else digits[-n:])
+                digits = digits.rjust(n, "0")[-n:]
+                it = iter(digits)
+                fake = re.sub(r"\d", lambda _: next(it), original)
+            if fake in text or fake in self.names:
+                continue
+            self.names[fake] = original
             return fake
         return None
 

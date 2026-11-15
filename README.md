@@ -70,7 +70,23 @@ curl -N -H "$H" -H 'Content-Type: application/json' localhost:8001/v1/chat/compl
 ## PII de-identification (optional)
 
 `pip install -e '.[pii]'` then set `PII_ENABLED=true`. The first start downloads `nvidia/gliner-PII`.
-Detected spans in every message are replaced with placeholders (`[PERSON_1]`, `[EMAIL_1]`, ...) before the
-request goes to Bedrock; placeholders in the reply (full or streamed, even when split across chunks) are
-swapped back to the original values. The mapping lives only in memory for that one request.
+Detected spans in every message are replaced **before** the request goes to Bedrock, and swapped back in the
+reply (full or streamed, even when a value is split across chunks). The mapping lives only in memory for that
+one request.
+
+| Detected | Sent to Claude (example) |
+|---|---|
+| person | realistic English name: `Emily Johnson` -> `James Wilson` (first/last alone also restored, plus `'s`) |
+| address | city/state `Austin, Texas` -> `Springfield, Ohio`; street `245 Maple Street` -> `412 Oak Avenue`; lone US state -> fake state |
+| email | `name@example.com`-style fake on the reserved `example.com` domain |
+| phone number | same punctuation, fictional digits: `(415) 555-0132` -> `(202) 555-0100` |
+| anything else | bracket token such as `[DATE_OF_BIRTH_1]` |
+
+Adjacent spans of one kind are merged first (GLiNER often returns "Emily" and "Johnson" separately), so each
+person or place gets one fake value. Each pool holds 12 values per kind (100 for phones); past that, or for
+labels with no fake, the bracket token is used.
+
+Limits: values the detector misses are sent as written (for example a country or a state it did not tag); a fake
+that is a real place name can lead the model to state facts about that real place; the fake email is not derived
+from the fake name.
 See `app/pii.py` (detector + vault) and `app/hooks.py` (wiring).

@@ -98,3 +98,82 @@ def test_upstream_status_mapping(make_client, upstream, expected):
 def test_invalid_body(make_client):
     resp = make_client(lambda r: httpx.Response(500)).post("/v1/chat/completions", json={}, headers=AUTH)
     assert resp.status_code == 400
+
+
+class FakeDetector:
+    """Stands in for GLiNER: flags fixed strings."""
+
+    FOUND = {"Alice Smith": "person", "a@b.co": "email", "Pokhara Nepal": "address", "1990-01-01": "date of birth"}
+
+    def detect(self, text):
+        return [
+            {"start": i, "end": i + len(v), "label": label, "text": v}
+            for v, label in self.FOUND.items()
+            if (i := text.find(v)) >= 0
+        ]
+
+
+@pytest.fixture
+def pii(monkeypatch):
+    hooks.configure(FakeDetector())
+    yield
+    hooks.configure(None)
+
+
+def _stream_text(client, content):
+    import json
+
+    stream_body = {"stream": True, "messages": [{"role": "user", "content": content}]}
+    with client.stream("POST", "/v1/chat/completions", json=stream_body, headers=AUTH) as resp:
+        text = resp.read().decode()
+    return "".join(
+        json.loads(l[6:])["choices"][0]["delta"].get("content", "")
+        for l in text.splitlines() if l.startswith("data: {")
+    )
+
+
+def test_pii_names_become_fake_names_and_roundtrip(make_client, pii):
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.read().decode()
+        reply = "Hello James Wilson! James's plan is ready, thanks Wilson."
+        return httpx.Response(200, json={"output": {"message": {"content": [{"text": reply}]}}})
+
+    body = {"messages": [{"role": "user", "content": "I am Alice Smith"}]}
+    resp = make_client(handler).post("/v1/chat/completions", json=body, headers=AUTH)
+    assert "Alice" not in seen["body"] and "James Wilson" in seen["body"] and "[PERSON" not in seen["body"]
+    assert resp.json()["choices"][0]["message"]["content"] == "Hello Alice Smith! Alice's plan is ready, thanks Smith."
+
+
+def test_pii_non_name_values_keep_bracket_tokens(make_client, pii):
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.read().decode()
+        return httpx.Response(200, json={"output": {"message": {"content": [{"text": "Born [DATE_OF_BIRTH_1] ok"}]}}})
+
+    body = {"messages": [{"role": "user", "content": "I was born 1990-01-01"}]}
+    resp = make_client(handler).post("/v1/chat/completions", json=body, headers=AUTH)
+    assert "1990" not in seen["body"] and "[DATE_OF_BIRTH_1]" in seen["body"]
+    assert resp.json()["choices"][0]["message"]["content"] == "Born 1990-01-01 ok"
+
+
+def test_pii_fake_name_avoids_names_already_in_text(make_client, pii):
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.read().decode()
+        return httpx.Response(200, json={"output": {"message": {"content": [{"text": "ok"}]}}})
+
+    body = {"messages": [{"role": "user", "content": "James asked about Alice Smith"}]}
+    make_client(handler).post("/v1/chat/completions", json=body, headers=AUTH)
+    assert "Alice" not in seen["body"] and "Emma Turner" in seen["body"]  # "James" was taken
+
+
+def test_pii_restores_placeholders_split_across_stream_chunks(make_client, pii):
+    chunks = ["Hi [DATE_OF", "_BIRTH_", "1], Ja", "mes Wil", "son and James", "'s dog, bye [x"]
+    stream = b"".join(frame("contentBlockDelta", {"delta": {"text": t}}) for t in chunks)
+    client = make_client(lambda r: httpx.Response(200, content=stream))
+    out = _stream_text(client, "I am Alice Smith, born 1990-01-01")
+    assert out == "Hi 1990-01-01, Alice Smith and Alice's dog, bye [x"

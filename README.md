@@ -45,6 +45,8 @@ curl localhost:8001/health
 - Memory: one server process holds about 4.2 GiB idle (about 2.5 GiB during a request, measured). With Docker's
   default 8 GB do not load a second copy of the model in the same container (for example a second Python process
   that builds `GlinerDetector`): the container is OOM-killed (exit 137).
+- `restart: unless-stopped` brings the container back after a crash or OOM kill; the model reloads, so allow
+  roughly 20-60 s before `/health` answers again.
 
 ## curl
 

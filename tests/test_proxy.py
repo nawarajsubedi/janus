@@ -177,3 +177,36 @@ def test_pii_restores_placeholders_split_across_stream_chunks(make_client, pii):
     client = make_client(lambda r: httpx.Response(200, content=stream))
     out = _stream_text(client, "I am Alice Smith, born 1990-01-01")
     assert out == "Hi 1990-01-01, Alice Smith and Alice's dog, bye [x"
+
+
+class SplitDetector:
+    """Mimics GLiNER splitting one thing into several spans."""
+
+    def __init__(self, spans):
+        self.spans = spans
+
+    def detect(self, text):
+        out = []
+        for value, label in self.spans:
+            i = text.find(value)
+            if i >= 0:
+                out.append({"start": i, "end": i + len(value), "label": label, "text": value})
+        return out
+
+
+def _roundtrip(spans, text, reply=None):
+    from app.pii import Vault
+
+    v = Vault(SplitDetector(spans))
+    sent = v.redact(text)
+    return sent, v.restore(reply if reply is not None else sent)
+
+
+def test_split_name_is_merged_into_one_english_name():
+    sent, back = _roundtrip([("Emily", "person"), ("Johnson", "person")], "Hi, I'm Emily Johnson from here")
+    assert sent == "Hi, I'm James Wilson from here" and back == "Hi, I'm Emily Johnson from here"
+
+
+def test_two_separate_people_are_not_merged():
+    sent, back = _roundtrip([("Alice", "person"), ("Bob", "person")], "Alice, Bob and I")
+    assert sent == "James, Emma and I" and back == "Alice, Bob and I"

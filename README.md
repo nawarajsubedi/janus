@@ -26,8 +26,25 @@ python -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/pytest
 ```
 
-Docker: `docker compose up --build`. Enable model access for the Claude model in your Bedrock region first;
-`BEDROCK_MODEL` takes a model ID or inference-profile ID.
+Enable model access for the Claude model in your Bedrock region first; `BEDROCK_MODEL` takes a model ID or
+inference-profile ID.
+
+## Docker
+
+```bash
+scripts/fetch_wheels.sh        # one-time: pre-download the Linux wheels into ./wheels (git-ignored, ~220 MB)
+docker compose up -d --build   # or docker-compose
+curl localhost:8001/health
+```
+
+- The image installs **offline** from `./wheels` (CPU-only torch + gliner + fastapi ...), so the build does not
+  depend on a slow PyPI. If PyPI is slow, use a mirror: `PIP_INDEX_URL=<mirror>/simple scripts/fetch_wheels.sh`.
+  On an Intel/AMD Docker host run `ARCH=x86_64 scripts/fetch_wheels.sh`.
+- `docker-compose.yml` sets `PII_ENABLED=true`. The first start downloads `nvidia/gliner-PII` into the `models`
+  volume (health check `start_period` is 120 s); later starts reuse it.
+- Memory: one server process holds about 4.2 GiB idle (about 2.5 GiB during a request, measured). With Docker's
+  default 8 GB do not load a second copy of the model in the same container (for example a second Python process
+  that builds `GlinerDetector`): the container is OOM-killed (exit 137).
 
 ## curl
 

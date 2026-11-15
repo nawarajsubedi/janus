@@ -12,6 +12,7 @@ LABELS = [
 FAKE_KIND = {"person": "name", "patient name": "name"}
 FIRST_NAMES = ["James", "Emma", "Oliver", "Charlotte", "William", "Amelia", "Henry", "Grace", "Thomas", "Olivia", "Daniel", "Hannah"]
 LAST_NAMES = ["Wilson", "Turner", "Harris", "Walker", "Clarke", "Wright", "Hughes", "Foster", "Morgan", "Cooper", "Ward", "Bailey"]
+GAP = {"name": re.compile(r" {1,2}")}  # text allowed between spans we merge
 TOKEN = re.compile(r"\[([A-Z_]+_\d+)\]")
 MAX_TOKEN_LEN = 48  # longest tail we hold back while waiting for a closing "]"
 
@@ -28,6 +29,19 @@ class GlinerDetector:
 
     def detect(self, text: str) -> list[dict[str, Any]]:
         return self.model.predict_entities(text, LABELS, threshold=self.threshold)
+
+
+def merge_adjacent(text: str, ents: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Join neighbouring spans of one kind ("Emily" "Johnson", "Austin" ", " "Texas") into a single entity."""
+    out: list[dict[str, Any]] = []
+    for e in sorted(ents, key=lambda e: e["start"]):
+        prev, kind = (out[-1] if out else None), FAKE_KIND.get(e["label"])
+        if prev and kind in GAP and prev["label"] == e["label"] and e["start"] >= prev["end"] \
+                and GAP[kind].fullmatch(text[prev["end"] : e["start"]]):
+            out[-1] = {**prev, "end": e["end"], "text": text[prev["start"] : e["end"]]}
+        else:
+            out.append(dict(e))
+    return out
 
 
 class Vault:
@@ -82,8 +96,10 @@ class Vault:
         return self._by_value[key]
 
     def redact(self, text: str) -> str:
-        for ent in sorted(self.detector.detect(text), key=lambda e: e["start"], reverse=True):
-            text = text[: ent["start"]] + self._placeholder(ent["label"], ent["text"], text) + text[ent["end"] :]
+        ents = merge_adjacent(text, self.detector.detect(text))  # sorted by position
+        fakes = [self._placeholder(e["label"], e["text"], text) for e in ents]  # hand out in reading order
+        for ent, fake in reversed(list(zip(ents, fakes))):  # splice right-to-left so offsets stay valid
+            text = text[: ent["start"]] + fake + text[ent["end"] :]
         return text
 
     def _pattern(self) -> re.Pattern[str]:

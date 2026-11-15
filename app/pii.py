@@ -9,10 +9,23 @@ LABELS = [
     "date of birth", "passport number", "national identification number",
 ]
 # Labels that get a realistic fake value instead of a bracket token: label -> kind
-FAKE_KIND = {"person": "name", "patient name": "name"}
+FAKE_KIND = {"person": "name", "patient name": "name", "address": "address"}
 FIRST_NAMES = ["James", "Emma", "Oliver", "Charlotte", "William", "Amelia", "Henry", "Grace", "Thomas", "Olivia", "Daniel", "Hannah"]
 LAST_NAMES = ["Wilson", "Turner", "Harris", "Walker", "Clarke", "Wright", "Hughes", "Foster", "Morgan", "Cooper", "Ward", "Bailey"]
-GAP = {"name": re.compile(r" {1,2}")}  # text allowed between spans we merge
+CITIES = ["Springfield", "Riverton", "Fairview", "Lakewood", "Georgetown", "Clayton", "Ashland", "Milford", "Oakdale", "Brookfield", "Hudson", "Salem"]
+REGIONS = ["Ohio", "Oregon", "Texas", "Iowa", "Utah", "Maine", "Idaho", "Kansas", "Nevada", "Vermont", "Montana", "Georgia"]
+STREETS = ["412 Oak Avenue", "1580 Cedar Lane", "73 Willow Street", "906 Birch Road", "221 Elm Drive", "38 Pine Court",
+           "1175 Aspen Way", "64 Linden Street", "850 Poplar Avenue", "17 Sycamore Road", "309 Walnut Lane", "92 Spruce Drive"]
+STATES = {
+    "Alabama", "Alaska", "Arizona", "Arkansas", "California", "Colorado", "Connecticut", "Delaware", "Florida", "Georgia",
+    "Hawaii", "Idaho", "Illinois", "Indiana", "Iowa", "Kansas", "Kentucky", "Louisiana", "Maine", "Maryland", "Massachusetts",
+    "Michigan", "Minnesota", "Mississippi", "Missouri", "Montana", "Nebraska", "Nevada", "New Hampshire", "New Jersey",
+    "New Mexico", "New York", "North Carolina", "North Dakota", "Ohio", "Oklahoma", "Oregon", "Pennsylvania", "Rhode Island",
+    "South Carolina", "South Dakota", "Tennessee", "Texas", "Utah", "Vermont", "Virginia", "Washington", "West Virginia",
+    "Wisconsin", "Wyoming",
+}
+STREET_WORD = re.compile(r"\b(street|st|avenue|ave|road|rd|boulevard|blvd|lane|ln|drive|dr|way|court|ct)\b", re.I)
+GAP = {"name": re.compile(r" {1,2}"), "address": re.compile(r"\s*,?\s*")}  # text allowed between spans we merge
 TOKEN = re.compile(r"\[([A-Z_]+_\d+)\]")
 MAX_TOKEN_LEN = 48  # longest tail we hold back while waiting for a closing "]"
 
@@ -47,7 +60,7 @@ def merge_adjacent(text: str, ents: list[dict[str, Any]]) -> list[dict[str, Any]
 class Vault:
     """Per-request mapping of placeholder <-> original value.
 
-    People get realistic fake names (so the model can use them naturally); every
+    People and addresses get realistic fake values (so the model can use them naturally); every
     other label gets a bracket token like `[EMAIL_1]`. Both are swapped back in the reply.
     """
 
@@ -67,7 +80,14 @@ class Vault:
         if not words:
             return None
         kind = FAKE_KIND[label]
-        pool, second, sep = FIRST_NAMES, LAST_NAMES, " "
+        if kind == "address":
+            if original[:1].isdigit() or STREET_WORD.search(original):
+                kind = "street"
+            elif original in STATES:
+                kind = "state"
+        pool = {"name": FIRST_NAMES, "address": CITIES, "state": REGIONS, "street": STREETS}[kind]
+        second = {"name": LAST_NAMES, "address": REGIONS}.get(kind)
+        sep = ", " if kind == "address" and "," in original else " "
         seen = {w.lower() for w in re.findall(r"[A-Za-z]+", text)} | self._used_words
         while (i := self._next.get(kind, 0)) < len(pool):
             self._next[kind] = i + 1

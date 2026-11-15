@@ -238,3 +238,22 @@ def test_lone_us_state_gets_a_fake_state_not_a_city():
 def test_two_separate_people_are_not_merged():
     sent, back = _roundtrip([("Alice", "person"), ("Bob", "person")], "Alice, Bob and I")
     assert sent == "James, Emma and I" and back == "Alice, Bob and I"
+
+
+def test_email_becomes_example_com_address_and_roundtrips():
+    sent, back = _roundtrip([("sarah.connor@gmail.com", "email")], "write to sarah.connor@gmail.com please")
+    assert sent == "write to alex.morgan@example.com please" and back == "write to sarah.connor@gmail.com please"
+
+
+def test_phone_keeps_format_with_fictional_digits():
+    for real, fake in [("415-555-0132", "202-555-0100"), ("(415) 555-0132", "(202) 555-0100"),
+                       ("+1 415 555 0132", "+1 202 555 0100"), ("555-0132", "555-0100")]:
+        sent, back = _roundtrip([(real, "phone number")], f"call {real} now")
+        assert sent == f"call {fake} now" and back == f"call {real} now", real
+
+
+def test_streamed_email_split_across_chunks_is_restored(make_client, pii):
+    chunks = ["Mail alex.mor", "gan@exam", "ple.com now"]
+    stream = b"".join(frame("contentBlockDelta", {"delta": {"text": t}}) for t in chunks)
+    client = make_client(lambda r: httpx.Response(200, content=stream))
+    assert _stream_text(client, "I am at a@b.co") == "Mail a@b.co now"

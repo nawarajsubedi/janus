@@ -1,22 +1,28 @@
-# Janus: a privacy layer for using Claude on your own data
+# Janus: a privacy layer for using Claude on fintech and government data
 
-Many teams want to use a strong LLM on real work (support tickets, medical notes, HR cases, contracts,
-customer emails, loan and KYC files, tax and benefits records, citizen requests), but those texts are full of
-personal data. Sending them to a cloud model raises privacy and compliance problems (GDPR, HIPAA, PCI DSS,
-banking and fintech regulation, government data rules, company policy). Masking everything with `[REDACTED]` makes the text
-unreadable, scrubbing by hand is slow and error-prone, and not using the model gives up the benefit.
+Banks, fintechs and government agencies hold some of the most sensitive data there is: account and card
+numbers, loan and KYC files, transaction disputes, tax and benefits records, national IDs, passports, citizen
+requests and case files. They also have the most to gain from an LLM (summaries, triage, drafting replies,
+fraud and compliance review), and the strictest rules about where that data may go (PCI DSS, GDPR, GLBA,
+AML/KYC, data-residency and public-sector data-handling rules). Masking everything with `[REDACTED]` makes the
+text unreadable, scrubbing by hand is slow and error-prone, and not using the model gives up the benefit.
 
 Janus sits between your tools and Claude on Amazon Bedrock. Point any OpenAI-compatible client at it:
 
-1. **Detect.** A local GLiNER model finds personal data in each prompt.
-2. **Swap.** Real names, addresses, emails and phones are replaced with realistic fake ones, so Claude reads
-   natural text and answers well, but never sees the real person.
-3. **Restore.** In the reply (full or streamed) the fake values are swapped back to the real ones.
+1. **Detect.** A local GLiNER model finds personal and financial identifiers in each prompt: names, addresses,
+   emails, phones, bank account numbers, card numbers, national IDs, passport numbers, dates of birth.
+2. **Swap.** Names, addresses, emails and phones become realistic fake values, so Claude reads natural text and
+   answers well but never sees the real person. Account, card, ID and passport numbers become tokens such as
+   `[BANK_ACCOUNT_NUMBER_1]`, so the model never sees them at all.
+3. **Restore.** In the reply (full or streamed) every fake value and token is swapped back to the real one.
 
-It is self-hosted (Docker), keeps secrets in `.env`, and PII protection can be switched on or off.
-It suits healthcare, banking and fintech, government and public sector, legal, insurance, HR and support teams.
-It is a safeguard, not a compliance certification: check your own regulatory requirements.
-Detection is not perfect (GLiNER can miss some entities), and protection on costs about 3 requests per second per CPU container.
+Typical uses: summarising a customer dispute or loan file, triaging citizen requests or benefit claims,
+drafting letters to account holders, reviewing case notes, all without the raw identifiers leaving your side.
+
+It is self-hosted (Docker), keeps secrets in `.env`, and PII protection can be switched on or off. It also
+fits healthcare, legal, insurance, HR and support. It is a safeguard, not a compliance certification: check
+your own regulatory requirements. Detection is not perfect (GLiNER can miss some entities), and protection on
+costs about 3 requests per second per CPU container.
 
 ## The proxy
 

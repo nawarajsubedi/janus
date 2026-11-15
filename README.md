@@ -1,4 +1,21 @@
-# Bedrock OpenAI-compatible proxy
+# Janus: a privacy layer for using Claude on your own data
+
+Many teams want to use a strong LLM on real work (support tickets, medical notes, HR cases, contracts,
+customer emails), but those texts are full of personal data. Sending them to a cloud model raises privacy
+and compliance problems (GDPR, HIPAA, company policy). Masking everything with `[REDACTED]` makes the text
+unreadable, scrubbing by hand is slow and error-prone, and not using the model gives up the benefit.
+
+Janus sits between your tools and Claude on Amazon Bedrock. Point any OpenAI-compatible client at it:
+
+1. **Detect.** A local GLiNER model finds personal data in each prompt.
+2. **Swap.** Real names, addresses, emails and phones are replaced with realistic fake ones, so Claude reads
+   natural text and answers well, but never sees the real person.
+3. **Restore.** In the reply (full or streamed) the fake values are swapped back to the real ones.
+
+It is self-hosted (Docker), keeps secrets in `.env`, and PII protection can be switched on or off.
+Detection is not perfect (GLiNER can miss some entities), and protection on costs about 3 requests per second per CPU container.
+
+## The proxy
 
 FastAPI proxy that exposes `/v1/chat/completions` (JSON or SSE), `/v1/models` and `/health`
 in OpenAI format, and forwards to **Claude on Amazon Bedrock** via the Converse API.

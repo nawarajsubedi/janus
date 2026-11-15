@@ -179,6 +179,19 @@ def test_pii_restores_placeholders_split_across_stream_chunks(make_client, pii):
     assert out == "Hi 1990-01-01, Alice Smith and Alice's dog, bye [x"
 
 
+def test_pii_address_becomes_fake_address_and_roundtrips(make_client, pii):
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["body"] = request.read().decode()
+        return httpx.Response(200, json={"output": {"message": {"content": [{"text": "Springfield Ohio is lovely; Springfield too."}]}}})
+
+    body = {"messages": [{"role": "user", "content": "I live in Pokhara Nepal"}]}
+    resp = make_client(handler).post("/v1/chat/completions", json=body, headers=AUTH)
+    assert "Pokhara" not in seen["body"] and "Springfield Ohio" in seen["body"] and "[ADDRESS" not in seen["body"]
+    assert resp.json()["choices"][0]["message"]["content"] == "Pokhara Nepal is lovely; Pokhara too."
+
+
 class SplitDetector:
     """Mimics GLiNER splitting one thing into several spans."""
 
@@ -205,6 +218,21 @@ def _roundtrip(spans, text, reply=None):
 def test_split_name_is_merged_into_one_english_name():
     sent, back = _roundtrip([("Emily", "person"), ("Johnson", "person")], "Hi, I'm Emily Johnson from here")
     assert sent == "Hi, I'm James Wilson from here" and back == "Hi, I'm Emily Johnson from here"
+
+
+def test_city_and_state_merge_and_keep_the_comma():
+    sent, back = _roundtrip([("Austin", "address"), ("Texas", "address")], "I live in Austin, Texas today")
+    assert sent == "I live in Springfield, Ohio today" and back == "I live in Austin, Texas today"
+
+
+def test_street_gets_a_street_shaped_fake():
+    sent, back = _roundtrip([("245 Maple Street", "address")], "I live at 245 Maple Street, Denver")
+    assert sent == "I live at 412 Oak Avenue, Denver" and back == "I live at 245 Maple Street, Denver"
+
+
+def test_lone_us_state_gets_a_fake_state_not_a_city():
+    sent, _ = _roundtrip([("Texas", "address")], "from Texas")
+    assert sent == "from Ohio"
 
 
 def test_two_separate_people_are_not_merged():
